@@ -6,7 +6,8 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.Spinner
 import android.widget.ArrayAdapter
-import android.widget.TextView
+import android.widget.ListView
+import android.widget.RadioButton
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -26,14 +27,17 @@ import com.yandex.mapkit.map.Map
 import com.yandex.mapkit.map.MapObjectCollection
 
 class MainActivity : AppCompatActivity(), CameraListener {
+    // Инициализация переменных для работы с картой и зонами
     private lateinit var binding: ActivityMainBinding
     private lateinit var mapObjectCollection: MapObjectCollection
     private var currentCircle: CircleMapObject? = null
     private var startPoint: Point? = null
     private var zoneName: String = ""
     private var zoneColor: Int = Color.argb(128, 0, 0, 255)
-    private var zoneRadius: Float = 1.0f // Default radius in kilometers
+    private var zoneRadius: Float = 1.0f // Радиус по умолчанию в километрах
     private var isCreatingZone: Boolean = false
+    private val safeZones = mutableListOf<CircleMapObject>()
+    private var selectedZone: CircleMapObject? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -45,21 +49,30 @@ class MainActivity : AppCompatActivity(), CameraListener {
         binding.mapview.map.addCameraListener(this)
         mapObjectCollection = binding.mapview.map.mapObjects
 
+        // Настройка кнопки для добавления безопасной зоны
         val addSafeZoneButton: Button = findViewById(R.id.add_safe_zone_button)
         addSafeZoneButton.setOnClickListener {
             isCreatingZone = true
             showZoneDialog(null)
         }
 
+        // Настройка кнопки для отображения списка зон
+        val showZonesButton: Button = findViewById(R.id.btn_show_zones)
+        showZonesButton.setOnClickListener {
+            showZonesListDialog()
+        }
+
+        // Добавление слушателей для взаимодействия с картой
         binding.mapview.map.addInputListener(inputListener)
         binding.mapview.map.addTapListener(geoObjectTapListener)
     }
 
+    // Слушатель для обработки нажатий на карту
     private val inputListener = object : InputListener {
         override fun onMapTap(map: Map, point: Point) {
             if (isCreatingZone && startPoint == null) {
                 startPoint = point
-                drawCircle(startPoint!!, zoneRadius * 1000) // Convert kilometers to meters
+                drawCircle(startPoint!!, zoneRadius * 1000) // Преобразование километров в метры
                 startPoint = null
                 isCreatingZone = false
             }
@@ -68,14 +81,16 @@ class MainActivity : AppCompatActivity(), CameraListener {
         override fun onMapLongTap(map: Map, point: Point) {}
     }
 
+    // Слушатель для обработки нажатий на объекты карты
     private val geoObjectTapListener = GeoObjectTapListener { geoObjectTapEvent ->
         val mapObject = geoObjectTapEvent.geoObject
         if (mapObject is CircleMapObject) {
-            showZoneInfoDialog(mapObject)
+            showDeleteZoneDialog(mapObject)
         }
         true
     }
 
+    // Функция для рисования зоны на карте
     private fun drawCircle(center: Point, radius: Float) {
         val circle = Circle(center, radius)
         currentCircle = mapObjectCollection.addCircle(
@@ -85,8 +100,10 @@ class MainActivity : AppCompatActivity(), CameraListener {
             zoneColor
         )
         currentCircle?.userData = zoneName
+        safeZones.add(currentCircle!!)
     }
 
+    // Функция для отображения диалога ввода параметров зоны
     private fun showZoneDialog(circle: CircleMapObject?) {
         val builder = AlertDialog.Builder(this)
         builder.setTitle("Введите параметры зоны")
@@ -106,7 +123,7 @@ class MainActivity : AppCompatActivity(), CameraListener {
 
         if (circle != null) {
             nameInput.setText(circle.userData as? String ?: "")
-            radiusInput.setText((circle.geometry.radius / 1000).toString()) // Convert meters to kilometers
+            radiusInput.setText((circle.geometry.radius / 1000).toString()) // Преобразование метров в километры
             colorSpinner.setSelection(when (circle.strokeColor) {
                 Color.argb(128, 255, 0, 0) -> 0
                 Color.argb(128, 0, 0, 255) -> 1
@@ -139,42 +156,28 @@ class MainActivity : AppCompatActivity(), CameraListener {
         builder.show()
     }
 
-    private fun showZoneInfoDialog(circle: CircleMapObject) {
+    // Функция для отображения диалога подтверждения удаления зоны
+    private fun showDeleteZoneDialog(circle: CircleMapObject) {
         val builder = AlertDialog.Builder(this)
-        builder.setTitle("Информация о зоне")
-
-        val inflater = layoutInflater
-        val dialogLayout = inflater.inflate(R.layout.dialog_safe_zone_info, null)
-        builder.setView(dialogLayout)
-
-        val nameText: TextView = dialogLayout.findViewById(R.id.zone_name_info)
-        val radiusText: TextView = dialogLayout.findViewById(R.id.zone_radius_info)
-        val colorText: TextView = dialogLayout.findViewById(R.id.zone_color_info)
-
-        nameText.text = circle.userData as? String ?: ""
-        radiusText.text = (circle.geometry.radius / 1000).toString() // Convert meters to kilometers
-        colorText.text = when (circle.strokeColor) {
-            Color.argb(128, 255, 0, 0) -> "Красный"
-            Color.argb(128, 0, 0, 255) -> "Синий"
-            Color.argb(128, 0, 255, 0) -> "Зеленый"
-            else -> "Неизвестный"
-        }
-
-        builder.setPositiveButton("Изменить") { _, _ ->
-            showZoneDialog(circle)
+        builder.setTitle("Удалить зону")
+        builder.setMessage("Вы действительно хотите удалить эту зону?")
+        builder.setPositiveButton("Удалить") { _, _ ->
+            safeZones.remove(circle)
+            mapObjectCollection.remove(circle)
         }
         builder.setNegativeButton("Отмена") { _, _ -> }
-
         builder.show()
     }
 
+    // Функция для обновления параметров зоны
     private fun updateCircle(circle: CircleMapObject, name: String, color: Int, radius: Float) {
-        circle.geometry = Circle(circle.geometry.center, radius * 1000) // Convert kilometers to meters
+        circle.geometry = Circle(circle.geometry.center, radius * 1000) // Преобразование километров в метры
         circle.strokeColor = color
         circle.fillColor = color
         circle.userData = name
     }
 
+    // Функция для перемещения камеры на начальную позицию
     private fun moveToStartLocation() {
         val startLocation = Point(59.9402, 30.315)
         val zoomValue: Float = 16.5f
@@ -185,6 +188,7 @@ class MainActivity : AppCompatActivity(), CameraListener {
         )
     }
 
+    // Функция для установки API-ключа
     private fun setApiKey(savedInstanceState: Bundle?) {
         val haveApiKey = savedInstanceState?.getBoolean("haveApiKey") ?: false
         if (!haveApiKey) {
@@ -216,6 +220,37 @@ class MainActivity : AppCompatActivity(), CameraListener {
         finished: Boolean
     ) {
         // Обработка изменения позиции камеры
+    }
+
+    // Функция для отображения диалога со списком зон
+    private fun showZonesListDialog() {
+        val builder = AlertDialog.Builder(this)
+        builder.setTitle("Список безопасных зон")
+
+        val inflater = layoutInflater
+        val dialogLayout = inflater.inflate(R.layout.dialog_safe_zones_list, null)
+        builder.setView(dialogLayout)
+
+        val listView: ListView = dialogLayout.findViewById(R.id.list_safe_zones)
+        val adapter = SafeZoneAdapter(this, safeZones)
+        listView.adapter = adapter
+
+        listView.setOnItemClickListener { _, view, position, _ ->
+            val radioButton: RadioButton = view.findViewById(R.id.radio_button_zone)
+            radioButton.isChecked = true
+            selectedZone = safeZones[position]
+        }
+
+        builder.setPositiveButton("OK") { _, _ -> }
+        builder.setNeutralButton("УДАЛИТЬ") { _, _ ->
+            selectedZone?.let {
+                safeZones.remove(it)
+                mapObjectCollection.remove(it)
+                selectedZone = null
+                adapter.notifyDataSetChanged()
+            }
+        }
+        builder.show()
     }
 
     companion object {
